@@ -12,4 +12,11 @@ class Job(Base):
     location = Column(String)
     url = Column(String, unique=True)
     posted_at = Column(DateTime)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    status = Column(String, default="new")  # new | applied | ignored
+    applied_at = Column(DateTime, nullable=True)
+
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc)
+    )
