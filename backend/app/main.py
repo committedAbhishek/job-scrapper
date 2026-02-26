@@ -9,12 +9,22 @@ from app.scrapers.greenhouse import GreenhouseScraper
 from app.scrapers.lever import LeverScraper
 from app.services.job_service import JobService
 from app.models.schemas import JobResponse
+from app.models.schemas import PaginatedJobsResponse
 from typing import List
 from datetime import datetime, timedelta, timezone
 from app.config import COMPANIES
-
+from fastapi.middleware.cors import CORSMiddleware
+from app.services.scrape_service import scrape_all_companies
+from app.scheduler import start_scheduler
 
 app = FastAPI(title="Job Scraper API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # React dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -44,11 +54,12 @@ def scrape_jobs(company_slug: str, db: Session = Depends(get_db)):
     }
 
 
-@app.get("/jobs", response_model=List[JobResponse])
+@app.get("/jobs", response_model=PaginatedJobsResponse)
 def get_jobs(
     status: Optional[str] = None,
     keyword: Optional[str] = None,
-    limit: int = 50,
+    company: Optional[str] = None,
+    limit: int = 20,
     offset: int = 0,
     db: Session = Depends(get_db)
 ):
@@ -60,10 +71,22 @@ def get_jobs(
 
     if keyword:
         query = query.filter(Job.title.ilike(f"%{keyword}%"))
+    
+    if company:
+        query = query.filter(Job.company == company)
+
+    total = query.count()
 
     query = query.order_by(desc(Job.posted_at))
 
-    return query.offset(offset).limit(limit).all()
+    jobs = query.offset(offset).limit(limit).all()
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "data": jobs
+    }
 
 @app.get("/jobs/recent", response_model=List[JobResponse])
 def get_recent_jobs(db: Session = Depends(get_db)):
@@ -93,33 +116,9 @@ def update_job_status(job_id: int, status: str, db: Session = Depends(get_db)):
     return {"message": "Status updated", "job_id": job_id}
 
 @app.post("/scrape-all")
-def scrape_all(db: Session = Depends(get_db)):
-    total_inserted = 0
-    company_results = []
+def scrape_all():
+    return scrape_all_companies()
 
-    for company in COMPANIES:
-
-        if company["ats"] == "greenhouse":
-            scraper = GreenhouseScraper(company["slug"])
-        elif company["ats"] == "lever":
-            scraper = LeverScraper(company["slug"])
-        else:
-            continue
-
-        jobs = scraper.fetch_jobs()
-        stats = JobService.save_jobs(db, jobs)
-
-        company_results.append({
-            "company": company["name"],
-            "fetched_count": stats["fetched_count"],
-            "inserted_count": stats["inserted_count"]
-        })
-
-        total_inserted += stats["inserted_count"]
-
-    return {
-        "total_companies": len(COMPANIES),
-        "total_new_jobs_inserted": total_inserted,
-        "details": company_results
-    }
-
+@app.on_event("startup")
+def startup_event():
+    start_scheduler()

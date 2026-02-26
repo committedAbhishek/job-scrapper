@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
+from typing import List
 
 
 class JobResponse(BaseModel):
@@ -18,3 +19,9 @@ class JobResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class PaginatedJobsResponse(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    data: List[JobResponse]
